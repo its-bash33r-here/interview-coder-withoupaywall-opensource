@@ -196,9 +196,16 @@ export class ProcessingHelper {
     }
   }
 
-  public async processScreenshots(): Promise<void> {
+  public async processScreenshots(mode: "code" | "mcq" = "code"): Promise<void> {
     const mainWindow = this.deps.getMainWindow()
     if (!mainWindow) return
+
+    // Prevent duplicate processing - if already processing, cancel previous and start new
+    if (this.currentProcessingAbortController) {
+      console.log("Processing already in progress. Canceling previous request and starting new one.")
+      this.currentProcessingAbortController.abort()
+      this.currentProcessingAbortController = null
+    }
 
     const config = configHelper.loadConfig();
     
@@ -237,7 +244,121 @@ export class ProcessingHelper {
     }
 
     const view = this.deps.getView()
-    console.log("Processing screenshots in view:", view)
+    console.log("Processing screenshots in view:", view, "mode:", mode)
+
+    // Handle MCQ mode - allow processing when mode is "mcq" and view is "queue" or "mcq"
+    // (user might be processing new screenshots while viewing previous MCQ results)
+    if (mode === "mcq" && (view === "queue" || view === "mcq")) {
+      mainWindow.webContents.send(this.deps.PROCESSING_EVENTS.MCQ_START)
+      const screenshotQueue = this.screenshotHelper.getScreenshotQueue()
+      console.log("Processing MCQ screenshots:", screenshotQueue)
+      
+      // Check if the queue is empty
+      if (!screenshotQueue || screenshotQueue.length === 0) {
+        console.log("No screenshots found in queue");
+        // Don't send NO_SCREENSHOTS in MCQ mode - it's confusing and not needed
+        // Just return silently or send MCQ_ERROR instead
+        mainWindow.webContents.send(
+          this.deps.PROCESSING_EVENTS.MCQ_ERROR,
+          "No screenshots found in queue. Please take a screenshot first."
+        );
+        this.deps.setView("queue");
+        return;
+      }
+
+      // Check that files actually exist
+      const existingScreenshots = screenshotQueue.filter(path => fs.existsSync(path));
+      if (existingScreenshots.length === 0) {
+        console.log("Screenshot files don't exist on disk");
+        // Don't send NO_SCREENSHOTS in MCQ mode - it's confusing and not needed
+        // Just return silently or send MCQ_ERROR instead
+        mainWindow.webContents.send(
+          this.deps.PROCESSING_EVENTS.MCQ_ERROR,
+          "Screenshot files not found. Please take a screenshot again."
+        );
+        this.deps.setView("queue");
+        return;
+      }
+
+      try {
+        // Initialize AbortController
+        this.currentProcessingAbortController = new AbortController()
+        const { signal } = this.currentProcessingAbortController
+
+        const screenshots = await Promise.all(
+          existingScreenshots.map(async (path) => {
+            try {
+              return {
+                path,
+                preview: await this.screenshotHelper.getImagePreview(path),
+                data: fs.readFileSync(path).toString('base64')
+              };
+            } catch (err) {
+              console.error(`Error reading screenshot ${path}:`, err);
+              return null;
+            }
+          })
+        )
+
+        // Filter out any nulls from failed screenshots
+        const validScreenshots = screenshots.filter(Boolean);
+        
+        if (validScreenshots.length === 0) {
+          throw new Error("Failed to load screenshot data");
+        }
+
+        const result = await this.processMCQScreenshotsHelper(validScreenshots, signal)
+
+        if (!result.success) {
+          console.log("MCQ processing failed:", result.error)
+          if (result.error?.includes("API Key") || result.error?.includes("OpenAI") || result.error?.includes("Gemini")) {
+            mainWindow.webContents.send(
+              this.deps.PROCESSING_EVENTS.API_KEY_INVALID
+            )
+          } else {
+            mainWindow.webContents.send(
+              this.deps.PROCESSING_EVENTS.MCQ_ERROR,
+              result.error
+            )
+          }
+          // Reset view back to queue on error
+          console.log("Resetting view to queue due to error")
+          this.deps.setView("queue")
+          return
+        }
+
+        // Set view to MCQ if processing succeeded
+        console.log("Setting view to MCQ after successful processing")
+        mainWindow.webContents.send(
+          this.deps.PROCESSING_EVENTS.MCQ_SUCCESS,
+          result.data
+        )
+        this.deps.setView("mcq")
+      } catch (error: any) {
+        mainWindow.webContents.send(
+          this.deps.PROCESSING_EVENTS.MCQ_ERROR,
+          error
+        )
+        console.error("MCQ processing error:", error)
+        if (axios.isCancel(error)) {
+          mainWindow.webContents.send(
+            this.deps.PROCESSING_EVENTS.MCQ_ERROR,
+            "Processing was canceled by the user."
+          )
+        } else {
+          mainWindow.webContents.send(
+            this.deps.PROCESSING_EVENTS.MCQ_ERROR,
+            error.message || "Server error. Please try again."
+          )
+        }
+        // Reset view back to queue on error
+        console.log("Resetting view to queue due to error")
+        this.deps.setView("queue")
+      } finally {
+        this.currentProcessingAbortController = null
+      }
+      return
+    }
 
     if (view === "queue") {
       mainWindow.webContents.send(this.deps.PROCESSING_EVENTS.INITIAL_START)
@@ -1290,6 +1411,404 @@ If you include code examples, use proper markdown code blocks with language spec
     }
   }
 
+  private async processMCQScreenshotsHelper(
+    screenshots: Array<{ path: string; data: string }>,
+    signal: AbortSignal
+  ) {
+    try {
+      const config = configHelper.loadConfig();
+      const language = await this.getLanguage();
+      const mainWindow = this.deps.getMainWindow();
+      
+      // Step 1: Extract MCQ question(s) using AI Vision API
+      const imageDataList = screenshots.map(screenshot => screenshot.data);
+      
+      // Update the user on progress
+      if (mainWindow) {
+        mainWindow.webContents.send("processing-status", {
+          message: "Analyzing MCQ question from screenshots...",
+          progress: 20
+        });
+      }
+
+      let mcqData;
+      
+      if (config.apiProvider === "openai") {
+        if (!this.openaiClient) {
+          this.initializeAIClient();
+          
+          if (!this.openaiClient) {
+            return {
+              success: false,
+              error: "OpenAI API key not configured or invalid. Please check your settings."
+            };
+          }
+        }
+
+        const messages = [
+          {
+            role: "system" as const, 
+            content: "You are an expert at analyzing multiple choice questions (MCQs). Extract all MCQ questions from the screenshots and return them in JSON format. For each question, extract: question text, all options (with labels like A, B, C, D or 1, 2, 3, 4), and return as an array. Return ONLY valid JSON without markdown code blocks."
+          },
+          {
+            role: "user" as const,
+            content: [
+              {
+                type: "text" as const, 
+                text: `Extract all multiple choice questions from these screenshots. Return in JSON format as an array of objects, each with: question (string), options (array of {label: string, text: string}). Example format: [{"question": "...", "options": [{"label": "A", "text": "..."}, {"label": "B", "text": "..."}]}]. If there are multiple questions, include all of them.`
+              },
+              ...imageDataList.map(data => ({
+                type: "image_url" as const,
+                image_url: { url: `data:image/png;base64,${data}` }
+              }))
+            ]
+          }
+        ];
+
+        const extractionResponse = await this.openaiClient.chat.completions.create({
+          model: config.extractionModel || "gpt-4o",
+          messages: messages,
+          max_tokens: 4000,
+          temperature: 0.2
+        });
+
+        try {
+          const responseText = extractionResponse.choices[0].message.content;
+          const jsonText = responseText.replace(/```json|```/g, '').trim();
+          mcqData = JSON.parse(jsonText);
+          // Ensure it's an array
+          if (!Array.isArray(mcqData)) {
+            mcqData = [mcqData];
+          }
+        } catch (error) {
+          console.error("Error parsing OpenAI MCQ response:", error);
+          return {
+            success: false,
+            error: "Failed to parse MCQ information. Please try again or use clearer screenshots."
+          };
+        }
+      } else if (config.apiProvider === "gemini") {
+        if (!this.geminiApiKey) {
+          return {
+            success: false,
+            error: "Gemini API key not configured. Please check your settings."
+          };
+        }
+
+        try {
+          const geminiMessages: GeminiMessage[] = [
+            {
+              role: "user",
+              parts: [
+                {
+                  text: `Extract all multiple choice questions from these screenshots. Return in JSON format as an array of objects, each with: question (string), options (array of {label: string, text: string}). Example format: [{"question": "...", "options": [{"label": "A", "text": "..."}, {"label": "B", "text": "..."}]}]. If there are multiple questions, include all of them. Return ONLY valid JSON without markdown code blocks.`
+                },
+                ...imageDataList.map(data => ({
+                  inlineData: {
+                    mimeType: "image/png",
+                    data: data
+                  }
+                }))
+              ]
+            }
+          ];
+
+          const response = await axios.default.post(
+            `https://generativelanguage.googleapis.com/v1beta/models/${config.extractionModel || "gemini-2.0-flash"}:generateContent?key=${this.geminiApiKey}`,
+            {
+              contents: geminiMessages,
+              generationConfig: {
+                temperature: 0.2,
+                maxOutputTokens: 4000
+              }
+            },
+            { signal }
+          );
+
+          const responseData = response.data as GeminiResponse;
+          
+          if (!responseData.candidates || responseData.candidates.length === 0) {
+            throw new Error("Empty response from Gemini API");
+          }
+          
+          const responseText = responseData.candidates[0].content.parts[0].text;
+          const jsonText = responseText.replace(/```json|```/g, '').trim();
+          mcqData = JSON.parse(jsonText);
+          // Ensure it's an array
+          if (!Array.isArray(mcqData)) {
+            mcqData = [mcqData];
+          }
+        } catch (error) {
+          console.error("Error using Gemini API for MCQ:", error);
+          return {
+            success: false,
+            error: "Failed to process MCQ with Gemini API. Please check your API key or try again later."
+          };
+        }
+      } else if (config.apiProvider === "anthropic") {
+        if (!this.anthropicClient) {
+          return {
+            success: false,
+            error: "Anthropic API key not configured. Please check your settings."
+          };
+        }
+
+        try {
+          const messages = [
+            {
+              role: "user" as const,
+              content: [
+                {
+                  type: "text" as const,
+                  text: `Extract all multiple choice questions from these screenshots. Return in JSON format as an array of objects, each with: question (string), options (array of {label: string, text: string}). Example format: [{"question": "...", "options": [{"label": "A", "text": "..."}, {"label": "B", "text": "..."}]}]. If there are multiple questions, include all of them. Return ONLY valid JSON without markdown code blocks.`
+                },
+                ...imageDataList.map(data => ({
+                  type: "image" as const,
+                  source: {
+                    type: "base64" as const,
+                    media_type: "image/png" as const,
+                    data: data
+                  }
+                }))
+              ]
+            }
+          ];
+
+          const response = await this.anthropicClient.messages.create({
+            model: config.extractionModel || "claude-3-7-sonnet-20250219",
+            max_tokens: 4000,
+            messages: messages,
+            temperature: 0.2
+          });
+
+          const responseText = (response.content[0] as { type: 'text', text: string }).text;
+          const jsonText = responseText.replace(/```json|```/g, '').trim();
+          mcqData = JSON.parse(jsonText);
+          // Ensure it's an array
+          if (!Array.isArray(mcqData)) {
+            mcqData = [mcqData];
+          }
+        } catch (error: any) {
+          console.error("Error using Anthropic API for MCQ:", error);
+
+          if (error.status === 429) {
+            return {
+              success: false,
+              error: "Claude API rate limit exceeded. Please wait a few minutes before trying again."
+            };
+          } else if (error.status === 413 || (error.message && error.message.includes("token"))) {
+            return {
+              success: false,
+              error: "Your screenshots contain too much information for Claude to process. Switch to OpenAI or Gemini in settings which can handle larger inputs."
+            };
+          }
+
+          return {
+            success: false,
+            error: "Failed to process MCQ with Anthropic API. Please check your API key or try again later."
+          };
+        }
+      }
+      
+      // Update the user on progress
+      if (mainWindow) {
+        mainWindow.webContents.send("processing-status", {
+          message: "MCQ extracted successfully. Generating answers...",
+          progress: 50
+        });
+      }
+
+      // Step 2: Generate answers for each MCQ
+      const questionsWithAnswers = await Promise.all(
+        mcqData.map(async (mcq: any) => {
+          const answerResult = await this.generateMCQAnswerHelper(mcq, signal);
+          return {
+            question: mcq.question,
+            options: mcq.options,
+            correctAnswer: answerResult.correctAnswer,
+            explanation: answerResult.explanation
+          };
+        })
+      );
+
+      // Final progress update
+      if (mainWindow) {
+        mainWindow.webContents.send("processing-status", {
+          message: "MCQ answers generated successfully",
+          progress: 100
+        });
+      }
+
+      return { 
+        success: true, 
+        data: { questions: questionsWithAnswers } 
+      };
+    } catch (error: any) {
+      if (axios.isCancel(error)) {
+        return {
+          success: false,
+          error: "Processing was canceled by the user."
+        };
+      }
+      
+      if (error?.response?.status === 401) {
+        return {
+          success: false,
+          error: "Invalid API key. Please check your settings."
+        };
+      } else if (error?.response?.status === 429) {
+        return {
+          success: false,
+          error: "API rate limit exceeded or insufficient credits. Please try again later."
+        };
+      } else if (error?.response?.status === 500) {
+        return {
+          success: false,
+          error: "Server error. Please try again later."
+        };
+      }
+
+      console.error("MCQ API Error Details:", error);
+      return { 
+        success: false, 
+        error: error.message || "Failed to process MCQ. Please try again." 
+      };
+    }
+  }
+
+  private async generateMCQAnswerHelper(
+    mcq: { question: string; options: Array<{ label: string; text: string }> },
+    signal: AbortSignal
+  ): Promise<{ correctAnswer: string; explanation: string }> {
+    try {
+      const config = configHelper.loadConfig();
+      const mainWindow = this.deps.getMainWindow();
+
+      const promptText = `
+Given this multiple choice question:
+
+QUESTION: ${mcq.question}
+
+OPTIONS:
+${mcq.options.map(opt => `${opt.label}. ${opt.text}`).join('\n')}
+
+Determine the correct answer and provide:
+1. The correct answer label (e.g., "A", "B", "C", "D" or "Option 1", "Option 2", etc.)
+2. A brief explanation (2-3 sentences) explaining why this answer is correct.
+
+Format your response as:
+Correct Answer: [label]
+Explanation: [your explanation]
+`;
+
+      let responseContent;
+      
+      if (config.apiProvider === "openai") {
+        if (!this.openaiClient) {
+          throw new Error("OpenAI API key not configured");
+        }
+        
+        const solutionResponse = await this.openaiClient.chat.completions.create({
+          model: config.solutionModel || "gpt-4o",
+          messages: [
+            { role: "system", content: "You are an expert at solving multiple choice questions. Provide clear, accurate answers with explanations." },
+            { role: "user", content: promptText }
+          ],
+          max_tokens: 1000,
+          temperature: 0.2
+        });
+
+        responseContent = solutionResponse.choices[0].message.content;
+      } else if (config.apiProvider === "gemini") {
+        if (!this.geminiApiKey) {
+          throw new Error("Gemini API key not configured");
+        }
+        
+        try {
+          const geminiMessages = [
+            {
+              role: "user",
+              parts: [
+                {
+                  text: `You are an expert at solving multiple choice questions. Provide clear, accurate answers with explanations.\n\n${promptText}`
+                }
+              ]
+            }
+          ];
+
+          const response = await axios.default.post(
+            `https://generativelanguage.googleapis.com/v1beta/models/${config.solutionModel || "gemini-2.0-flash"}:generateContent?key=${this.geminiApiKey}`,
+            {
+              contents: geminiMessages,
+              generationConfig: {
+                temperature: 0.2,
+                maxOutputTokens: 1000
+              }
+            },
+            { signal }
+          );
+
+          const responseData = response.data as GeminiResponse;
+          
+          if (!responseData.candidates || responseData.candidates.length === 0) {
+            throw new Error("Empty response from Gemini API");
+          }
+          
+          responseContent = responseData.candidates[0].content.parts[0].text;
+        } catch (error) {
+          console.error("Error using Gemini API for MCQ answer:", error);
+          throw error;
+        }
+      } else if (config.apiProvider === "anthropic") {
+        if (!this.anthropicClient) {
+          throw new Error("Anthropic API key not configured");
+        }
+        
+        try {
+          const messages = [
+            {
+              role: "user" as const,
+              content: [
+                {
+                  type: "text" as const,
+                  text: `You are an expert at solving multiple choice questions. Provide clear, accurate answers with explanations.\n\n${promptText}`
+                }
+              ]
+            }
+          ];
+
+          const response = await this.anthropicClient.messages.create({
+            model: config.solutionModel || "claude-3-7-sonnet-20250219",
+            max_tokens: 1000,
+            messages: messages,
+            temperature: 0.2
+          });
+
+          responseContent = (response.content[0] as { type: 'text', text: string }).text;
+        } catch (error: any) {
+          console.error("Error using Anthropic API for MCQ answer:", error);
+          throw error;
+        }
+      }
+      
+      // Parse the response
+      const answerMatch = responseContent.match(/Correct Answer:?\s*([A-Z0-9]+|Option\s*[0-9]+)/i);
+      const explanationMatch = responseContent.match(/Explanation:?\s*([\s\S]*?)(?:\n\n|$)/i);
+      
+      const correctAnswer = answerMatch ? answerMatch[1].trim() : mcq.options[0]?.label || "Unknown";
+      const explanation = explanationMatch ? explanationMatch[1].trim() : "Answer determined based on analysis of the question and options.";
+
+      return { correctAnswer, explanation };
+    } catch (error: any) {
+      console.error("Error generating MCQ answer:", error);
+      // Return a fallback answer
+      return {
+        correctAnswer: mcq.options[0]?.label || "Unknown",
+        explanation: "Unable to generate explanation due to an error. Please try again."
+      };
+    }
+  }
+
   public cancelOngoingRequests(): void {
     let wasCancelled = false
 
@@ -1309,9 +1828,11 @@ If you include code examples, use proper markdown code blocks with language spec
 
     this.deps.setProblemInfo(null)
 
-    const mainWindow = this.deps.getMainWindow()
-    if (wasCancelled && mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send(this.deps.PROCESSING_EVENTS.NO_SCREENSHOTS)
-    }
+    // Don't send NO_SCREENSHOTS event when cancelling - it's confusing
+    // The reset-view event is sufficient to notify the UI
+    // const mainWindow = this.deps.getMainWindow()
+    // if (wasCancelled && mainWindow && !mainWindow.isDestroyed()) {
+    //   mainWindow.webContents.send(this.deps.PROCESSING_EVENTS.NO_SCREENSHOTS)
+    // }
   }
 }

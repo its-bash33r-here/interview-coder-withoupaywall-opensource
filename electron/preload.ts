@@ -19,7 +19,12 @@ export const PROCESSING_EVENTS = {
   //states for processing the debugging
   DEBUG_START: "debug-start",
   DEBUG_SUCCESS: "debug-success",
-  DEBUG_ERROR: "debug-error"
+  DEBUG_ERROR: "debug-error",
+
+  //states for processing MCQs
+  MCQ_START: "mcq-start",
+  MCQ_SUCCESS: "mcq-success",
+  MCQ_ERROR: "mcq-error"
 } as const
 
 // At the top of the file
@@ -59,6 +64,13 @@ const electronAPI = {
       ipcRenderer.removeListener("screenshot-taken", subscription)
     }
   },
+  onScreenshotError: (callback: (error: string) => void) => {
+    const subscription = (_: any, error: string) => callback(error)
+    ipcRenderer.on("screenshot-error", subscription)
+    return () => {
+      ipcRenderer.removeListener("screenshot-error", subscription)
+    }
+  },
   onResetView: (callback: () => void) => {
     const subscription = () => callback()
     ipcRenderer.on("reset-view", subscription)
@@ -93,6 +105,34 @@ const electronAPI = {
     ipcRenderer.on(PROCESSING_EVENTS.DEBUG_ERROR, subscription)
     return () => {
       ipcRenderer.removeListener(PROCESSING_EVENTS.DEBUG_ERROR, subscription)
+    }
+  },
+  onMCQStart: (callback: () => void) => {
+    const subscription = () => callback()
+    ipcRenderer.on(PROCESSING_EVENTS.MCQ_START, subscription)
+    return () => {
+      ipcRenderer.removeListener(PROCESSING_EVENTS.MCQ_START, subscription)
+    }
+  },
+  onMCQSuccess: (callback: (data: any) => void) => {
+    const subscription = (_: any, data: any) => callback(data)
+    ipcRenderer.on(PROCESSING_EVENTS.MCQ_SUCCESS, subscription)
+    return () => {
+      ipcRenderer.removeListener(PROCESSING_EVENTS.MCQ_SUCCESS, subscription)
+    }
+  },
+  onMCQError: (callback: (error: string) => void) => {
+    const subscription = (_: any, error: string) => callback(error)
+    ipcRenderer.on(PROCESSING_EVENTS.MCQ_ERROR, subscription)
+    return () => {
+      ipcRenderer.removeListener(PROCESSING_EVENTS.MCQ_ERROR, subscription)
+    }
+  },
+  onProcessingStatus: (callback: (data: { message: string; progress: number }) => void) => {
+    const subscription = (_: any, data: { message: string; progress: number }) => callback(data)
+    ipcRenderer.on("processing-status", subscription)
+    return () => {
+      ipcRenderer.removeListener("processing-status", subscription)
     }
   },
   onSolutionError: (callback: (error: string) => void) => {
@@ -149,8 +189,8 @@ const electronAPI = {
   // External URL handler
   openLink: (url: string) => shell.openExternal(url),
   triggerScreenshot: () => ipcRenderer.invoke("trigger-screenshot"),
-  triggerProcessScreenshots: () =>
-    ipcRenderer.invoke("trigger-process-screenshots"),
+  triggerProcessScreenshots: (mode?: "code" | "mcq") =>
+    ipcRenderer.invoke("trigger-process-screenshots", mode),
   triggerReset: () => ipcRenderer.invoke("trigger-reset"),
   triggerMoveLeft: () => ipcRenderer.invoke("trigger-move-left"),
   triggerMoveRight: () => ipcRenderer.invoke("trigger-move-right"),
@@ -205,7 +245,7 @@ const electronAPI = {
   
   // New methods for OpenAI API integration
   getConfig: () => ipcRenderer.invoke("get-config"),
-  updateConfig: (config: { apiKey?: string; model?: string; language?: string; opacity?: number }) => 
+  updateConfig: (config: { apiKey?: string; model?: string; language?: string; opacity?: number; mode?: "code" | "mcq" }) =>
     ipcRenderer.invoke("update-config", config),
   onShowSettings: (callback: () => void) => {
     const subscription = () => callback()
@@ -215,8 +255,8 @@ const electronAPI = {
     }
   },
   checkApiKey: () => ipcRenderer.invoke("check-api-key"),
-  validateApiKey: (apiKey: string) => 
-    ipcRenderer.invoke("validate-api-key", apiKey),
+  validateApiKey: (apiKey: string, provider?: "openai" | "gemini" | "anthropic") => 
+    ipcRenderer.invoke("validate-api-key", apiKey, provider),
   openExternal: (url: string) => 
     ipcRenderer.invoke("openExternal", url),
   onApiKeyInvalid: (callback: () => void) => {

@@ -17,7 +17,7 @@ async function fetchScreenshots(): Promise<Screenshot[]> {
 }
 
 interface QueueProps {
-  setView: (view: "queue" | "solutions" | "debug") => void
+  setView: (view: "queue" | "solutions" | "debug" | "mcq") => void
   credits: number
   currentLanguage: string
   setLanguage: (language: string) => void
@@ -34,6 +34,7 @@ const Queue: React.FC<QueueProps> = ({
   const [isTooltipVisible, setIsTooltipVisible] = useState(false)
   const [tooltipHeight, setTooltipHeight] = useState(0)
   const contentRef = useRef<HTMLDivElement>(null)
+  const [mode, setMode] = useState<"code" | "mcq">("code")
 
   const {
     data: screenshots = [],
@@ -66,6 +67,21 @@ const Queue: React.FC<QueueProps> = ({
     }
   }
 
+  // Load mode from config on mount
+  useEffect(() => {
+    const loadMode = async () => {
+      try {
+        const config = await window.electronAPI.getConfig()
+        if (config && config.mode) {
+          setMode(config.mode)
+        }
+      } catch (error) {
+        console.error("Error loading mode:", error)
+      }
+    }
+    loadMode()
+  }, [])
+
   useEffect(() => {
     // Height update logic
     const updateDimensions = () => {
@@ -93,6 +109,10 @@ const Queue: React.FC<QueueProps> = ({
     const cleanupFunctions = [
       window.electronAPI.onScreenshotTaken(() => refetch()),
       window.electronAPI.onResetView(() => refetch()),
+      window.electronAPI.onScreenshotError((error: string) => {
+        console.log("onScreenshotError callback triggered in Queue.tsx:", error.substring(0, 100));
+        showToast("Screenshot Failed", error, "error");
+      }),
       window.electronAPI.onDeleteLastScreenshot(async () => {
         if (screenshots.length > 0) {
           const lastScreenshot = screenshots[screenshots.length - 1];
@@ -111,7 +131,25 @@ const Queue: React.FC<QueueProps> = ({
         setView("queue") // Revert to queue if processing fails
         console.error("Processing error:", error)
       }),
-      window.electronAPI.onProcessingNoScreenshots(() => {
+      window.electronAPI.onProcessingNoScreenshots(async () => {
+        // Check mode directly from config (don't rely on state which might not be loaded yet)
+        try {
+          const config = await window.electronAPI.getConfig()
+          const currentMode = config?.mode || "code"
+          
+          // Don't show toast if mode is "mcq" - MCQ mode handles this differently
+          if (currentMode === "mcq") {
+            console.log('[Queue.tsx] NO_SCREENSHOTS event received but suppressing toast in MCQ mode, mode:', currentMode)
+            return
+          }
+        } catch (error) {
+          console.error("Error checking mode:", error)
+          // Fallback to state check if config check fails
+          if (mode === "mcq") {
+            return
+          }
+        }
+        
         showToast(
           "No Screenshots",
           "There are no screenshots to process.",

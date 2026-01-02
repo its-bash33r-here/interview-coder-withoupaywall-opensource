@@ -166,7 +166,7 @@ export const ComplexitySection = ({
 }
 
 export interface SolutionsProps {
-  setView: (view: "queue" | "solutions" | "debug") => void
+  setView: (view: "queue" | "solutions" | "debug" | "mcq") => void
   credits: number
   currentLanguage: string
   setLanguage: (language: string) => void

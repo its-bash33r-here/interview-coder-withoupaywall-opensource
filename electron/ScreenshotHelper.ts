@@ -20,9 +20,9 @@ export class ScreenshotHelper {
   private readonly extraScreenshotDir: string;
   private readonly tempDir: string;
 
-  private view: "queue" | "solutions" | "debug" = "queue";
+  private view: "queue" | "solutions" | "debug" | "mcq" = "queue";
 
-  constructor(view: "queue" | "solutions" | "debug" = "queue") {
+  constructor(view: "queue" | "solutions" | "debug" | "mcq" = "queue") {
     this.view = view;
 
     // Initialize directories
@@ -107,11 +107,11 @@ export class ScreenshotHelper {
     }
   }
 
-  public getView(): "queue" | "solutions" | "debug" {
+  public getView(): "queue" | "solutions" | "debug" | "mcq" {
     return this.view;
   }
 
-  public setView(view: "queue" | "solutions" | "debug"): void {
+  public setView(view: "queue" | "solutions" | "debug" | "mcq"): void {
     console.log("Setting view in ScreenshotHelper:", view);
     console.log(
       "Current queues - Main:",
@@ -308,7 +308,7 @@ export class ScreenshotHelper {
       }
 
       // Save and manage the screenshot based on current view
-      if (this.view === "queue") {
+      if (this.view === "queue" || this.view === "mcq") {
         screenshotPath = path.join(this.screenshotDir, `${uuidv4()}.png`);
         const screenshotDir = path.dirname(screenshotPath);
         if (!fs.existsSync(screenshotDir)) {
@@ -391,7 +391,7 @@ export class ScreenshotHelper {
         await fs.promises.unlink(path);
       }
 
-      if (this.view === "queue") {
+      if (this.view === "queue" || this.view === "mcq") {
         this.screenshotQueue = this.screenshotQueue.filter(
           (filePath) => filePath !== path
         );

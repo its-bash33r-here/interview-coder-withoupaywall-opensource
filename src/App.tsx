@@ -183,7 +183,7 @@ function App() {
     const onApiKeyInvalid = () => {
       showToast(
         "API Key Invalid",
-        "Your OpenAI API key appears to be invalid or has insufficient credits",
+        "Your API key appears to be invalid or has insufficient credits. Please check your settings.",
         "error"
       )
       setApiKeyDialogOpen(true)

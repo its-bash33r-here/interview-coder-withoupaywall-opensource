@@ -12,6 +12,7 @@ import { Input } from "../ui/input";
 import { Button } from "../ui/button";
 import { Settings } from "lucide-react";
 import { useToast } from "../../contexts/toast";
+import { LanguageDropdown } from "./LanguageDropdown";
 
 type APIProvider = "openai" | "gemini" | "anthropic";
 
@@ -50,13 +51,13 @@ const modelCategories: ModelCategory[] = [
     ],
     geminiModels: [
       {
-        id: "gemini-1.5-pro",
-        name: "Gemini 1.5 Pro",
+        id: "gemini-2.5-pro",
+        name: "Gemini 2.5 Pro",
         description: "Best overall performance for problem extraction"
       },
       {
-        id: "gemini-2.0-flash",
-        name: "Gemini 2.0 Flash",
+        id: "gemini-2.5-flash",
+        name: "Gemini 2.5 Flash",
         description: "Faster, more cost-effective option"
       }
     ],
@@ -96,13 +97,13 @@ const modelCategories: ModelCategory[] = [
     ],
     geminiModels: [
       {
-        id: "gemini-1.5-pro",
-        name: "Gemini 1.5 Pro",
+        id: "gemini-2.5-pro",
+        name: "Gemini 2.5 Pro",
         description: "Strong overall performance for coding tasks"
       },
       {
-        id: "gemini-2.0-flash",
-        name: "Gemini 2.0 Flash",
+        id: "gemini-2.5-flash",
+        name: "Gemini 2.5 Flash",
         description: "Faster, more cost-effective option"
       }
     ],
@@ -142,13 +143,13 @@ const modelCategories: ModelCategory[] = [
     ],
     geminiModels: [
       {
-        id: "gemini-1.5-pro",
-        name: "Gemini 1.5 Pro",
+        id: "gemini-2.5-pro",
+        name: "Gemini 2.5 Pro",
         description: "Best for analyzing code and error messages"
       },
       {
-        id: "gemini-2.0-flash",
-        name: "Gemini 2.0 Flash",
+        id: "gemini-2.5-flash",
+        name: "Gemini 2.5 Flash",
         description: "Faster, more cost-effective option"
       }
     ],
@@ -184,6 +185,7 @@ export function SettingsDialog({ open: externalOpen, onOpenChange }: SettingsDia
   const [extractionModel, setExtractionModel] = useState("gpt-4o");
   const [solutionModel, setSolutionModel] = useState("gpt-4o");
   const [debuggingModel, setDebuggingModel] = useState("gpt-4o");
+  const [language, setLanguage] = useState("python");
   const [isLoading, setIsLoading] = useState(false);
   const { showToast } = useToast();
 
@@ -213,6 +215,7 @@ export function SettingsDialog({ open: externalOpen, onOpenChange }: SettingsDia
         extractionModel?: string;
         solutionModel?: string;
         debuggingModel?: string;
+        language?: string;
       }
 
       window.electronAPI
@@ -223,6 +226,7 @@ export function SettingsDialog({ open: externalOpen, onOpenChange }: SettingsDia
           setExtractionModel(config.extractionModel || "gpt-4o");
           setSolutionModel(config.solutionModel || "gpt-4o");
           setDebuggingModel(config.debuggingModel || "gpt-4o");
+          setLanguage(config.language || "python");
         })
         .catch((error: unknown) => {
           console.error("Failed to load config:", error);
@@ -244,9 +248,9 @@ export function SettingsDialog({ open: externalOpen, onOpenChange }: SettingsDia
       setSolutionModel("gpt-4o");
       setDebuggingModel("gpt-4o");
     } else if (provider === "gemini") {
-      setExtractionModel("gemini-1.5-pro");
-      setSolutionModel("gemini-1.5-pro");
-      setDebuggingModel("gemini-1.5-pro");
+      setExtractionModel("gemini-2.5-pro");
+      setSolutionModel("gemini-2.5-pro");
+      setDebuggingModel("gemini-2.5-pro");
     } else if (provider === "anthropic") {
       setExtractionModel("claude-3-7-sonnet-20250219");
       setSolutionModel("claude-3-7-sonnet-20250219");
@@ -263,6 +267,7 @@ export function SettingsDialog({ open: externalOpen, onOpenChange }: SettingsDia
         extractionModel,
         solutionModel,
         debuggingModel,
+        language,
       });
       
       if (result) {
@@ -455,6 +460,17 @@ export function SettingsDialog({ open: externalOpen, onOpenChange }: SettingsDia
                 </>
               )}
             </div>
+          </div>
+          
+          <div className="space-y-2 mt-4">
+            <label className="text-sm font-medium text-white">Programming Language</label>
+            <p className="text-xs text-white/60 -mt-1 mb-2">
+              Select the programming language for code generation
+            </p>
+            <LanguageDropdown
+              currentLanguage={language}
+              onLanguageChange={setLanguage}
+            />
           </div>
           
           <div className="space-y-2 mt-4">

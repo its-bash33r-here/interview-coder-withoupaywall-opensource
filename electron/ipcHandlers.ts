@@ -90,7 +90,7 @@ export function initializeIpcHandlers(deps: IIpcHandlerDeps): void {
   })
 
   // Screenshot processing handlers
-  ipcMain.handle("process-screenshots", async () => {
+  ipcMain.handle("process-screenshots", async (_event, mode?: "code" | "mcq") => {
     // Check for API key before processing
     if (!configHelper.hasApiKey()) {
       const mainWindow = deps.getMainWindow();
@@ -100,7 +100,11 @@ export function initializeIpcHandlers(deps: IIpcHandlerDeps): void {
       return;
     }
     
-    await deps.processingHelper?.processScreenshots()
+    // Get mode from config if not provided
+    const config = configHelper.loadConfig();
+    const processingMode = mode || config.mode || "code";
+    
+    await deps.processingHelper?.processScreenshots(processingMode)
   })
 
   // Window dimension handlers
@@ -126,7 +130,8 @@ export function initializeIpcHandlers(deps: IIpcHandlerDeps): void {
       let previews = []
       const currentView = deps.getView()
 
-      if (currentView === "queue") {
+      // MCQ mode uses main queue (like queue view), not extra queue
+      if (currentView === "queue" || currentView === "mcq") {
         const queue = deps.getScreenshotQueue()
         previews = await Promise.all(
           queue.map(async (path) => ({
@@ -232,7 +237,7 @@ export function initializeIpcHandlers(deps: IIpcHandlerDeps): void {
   })
 
   // Process screenshot handlers
-  ipcMain.handle("trigger-process-screenshots", async () => {
+  ipcMain.handle("trigger-process-screenshots", async (_event, mode?: "code" | "mcq") => {
     try {
       // Check for API key before processing
       if (!configHelper.hasApiKey()) {
@@ -243,7 +248,11 @@ export function initializeIpcHandlers(deps: IIpcHandlerDeps): void {
         return { success: false, error: "API key required" };
       }
       
-      await deps.processingHelper?.processScreenshots()
+      // Get mode from config if not provided
+      const config = configHelper.loadConfig();
+      const processingMode = mode || config.mode || "code";
+      
+      await deps.processingHelper?.processScreenshots(processingMode)
       return { success: true }
     } catch (error) {
       console.error("Error processing screenshots:", error)

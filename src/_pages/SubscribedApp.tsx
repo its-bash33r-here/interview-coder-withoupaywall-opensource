@@ -3,6 +3,7 @@ import { useQueryClient } from "@tanstack/react-query"
 import { useEffect, useRef, useState } from "react"
 import Queue from "../_pages/Queue"
 import Solutions from "../_pages/Solutions"
+import MCQ from "../_pages/MCQ"
 import { useToast } from "../contexts/toast"
 
 interface SubscribedAppProps {
@@ -17,7 +18,7 @@ const SubscribedApp: React.FC<SubscribedAppProps> = ({
   setLanguage
 }) => {
   const queryClient = useQueryClient()
-  const [view, setView] = useState<"queue" | "solutions" | "debug">("queue")
+  const [view, setView] = useState<"queue" | "solutions" | "debug" | "mcq">("queue")
   const containerRef = useRef<HTMLDivElement>(null)
   const { showToast } = useToast()
 
@@ -35,6 +36,9 @@ const SubscribedApp: React.FC<SubscribedAppProps> = ({
       })
       queryClient.invalidateQueries({
         queryKey: ["new_solution"]
+      })
+      queryClient.invalidateQueries({
+        queryKey: ["mcq"]
       })
       setView("queue")
     })
@@ -92,6 +96,12 @@ const SubscribedApp: React.FC<SubscribedAppProps> = ({
       window.electronAPI.onSolutionStart(() => {
         setView("solutions")
       }),
+      window.electronAPI.onMCQStart(() => {
+        setView("mcq")
+      }),
+      window.electronAPI.onMCQSuccess(() => {
+        setView("mcq")
+      }),
       window.electronAPI.onUnauthorized(() => {
         queryClient.removeQueries({
           queryKey: ["screenshots"]
@@ -101,6 +111,9 @@ const SubscribedApp: React.FC<SubscribedAppProps> = ({
         })
         queryClient.removeQueries({
           queryKey: ["problem_statement"]
+        })
+        queryClient.removeQueries({
+          queryKey: ["mcq"]
         })
         setView("queue")
       }),
@@ -113,6 +126,9 @@ const SubscribedApp: React.FC<SubscribedAppProps> = ({
         })
         queryClient.removeQueries({
           queryKey: ["problem_statement"]
+        })
+        queryClient.removeQueries({
+          queryKey: ["mcq"]
         })
         setView("queue")
       }),
@@ -145,6 +161,13 @@ const SubscribedApp: React.FC<SubscribedAppProps> = ({
         />
       ) : view === "solutions" ? (
         <Solutions
+          setView={setView}
+          credits={credits}
+          currentLanguage={currentLanguage}
+          setLanguage={setLanguage}
+        />
+      ) : view === "mcq" ? (
+        <MCQ
           setView={setView}
           credits={credits}
           currentLanguage={currentLanguage}

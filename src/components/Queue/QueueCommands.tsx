@@ -21,8 +21,36 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
   setLanguage
 }) => {
   const [isTooltipVisible, setIsTooltipVisible] = useState(false)
+  const [mode, setMode] = useState<"code" | "mcq">("code")
   const tooltipRef = useRef<HTMLDivElement>(null)
   const { showToast } = useToast()
+
+  // Load mode from config on mount
+  useEffect(() => {
+    const loadMode = async () => {
+      try {
+        const config = await window.electronAPI.getConfig()
+        if (config && config.mode) {
+          setMode(config.mode)
+        }
+      } catch (error) {
+        console.error("Error loading mode:", error)
+      }
+    }
+    loadMode()
+  }, [])
+
+  // Handle mode change
+  const handleModeChange = async (newMode: "code" | "mcq") => {
+    try {
+      await window.electronAPI.updateConfig({ mode: newMode })
+      setMode(newMode)
+      console.log(`Mode changed to ${newMode}`)
+    } catch (error) {
+      console.error("Error updating mode:", error)
+      showToast("Error", "Failed to update mode", "error")
+    }
+  }
 
   // Extract the repeated language selection logic into a separate function
   const extractLanguagesAndUpdate = (direction?: 'next' | 'prev') => {
@@ -163,10 +191,9 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
                 credits <= 0 ? "opacity-50 cursor-not-allowed" : ""
               }`}
               onClick={async () => {
-
                 try {
                   const result =
-                    await window.electronAPI.triggerProcessScreenshots()
+                    await window.electronAPI.triggerProcessScreenshots(mode)
                   if (!result.success) {
                     console.error(
                       "Failed to process screenshots:",
@@ -193,6 +220,32 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
               </div>
             </div>
           )}
+
+          {/* Mode Toggle */}
+          <div className="flex items-center gap-1.5">
+            <button
+              className={`px-2 py-1 rounded text-[11px] leading-none transition-colors ${
+                mode === "code"
+                  ? "bg-white/20 text-white"
+                  : "bg-white/5 text-white/60 hover:bg-white/10"
+              }`}
+              onClick={() => handleModeChange("code")}
+              title="Code Mode"
+            >
+              Code
+            </button>
+            <button
+              className={`px-2 py-1 rounded text-[11px] leading-none transition-colors ${
+                mode === "mcq"
+                  ? "bg-white/20 text-white"
+                  : "bg-white/5 text-white/60 hover:bg-white/10"
+              }`}
+              onClick={() => handleModeChange("mcq")}
+              title="MCQ Mode"
+            >
+              MCQ
+            </button>
+          </div>
 
           {/* Separator */}
           <div className="mx-2 h-4 w-px bg-white/20" />
@@ -459,7 +512,7 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
                       {/* API Key Settings */}
                       <div className="mb-3 px-2 space-y-1">
                         <div className="flex items-center justify-between text-[13px] font-medium text-white/90">
-                          <span>OpenAI API Settings</span>
+                          <span>API Settings</span>
                           <button
                             className="bg-white/10 hover:bg-white/20 px-2 py-1 rounded text-[11px]"
                             onClick={() => window.electronAPI.openSettingsPortal()}

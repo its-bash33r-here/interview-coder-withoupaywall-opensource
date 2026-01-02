@@ -46,14 +46,24 @@ export class ShortcutsHelper {
             path: screenshotPath,
             preview
           })
-        } catch (error) {
+        } catch (error: any) {
           console.error("Error capturing screenshot:", error)
+          // Send error to renderer for user notification
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            const errorMessage = error?.message || "Failed to capture screenshot"
+            console.log("Sending screenshot-error event to renderer:", errorMessage.substring(0, 100))
+            mainWindow.webContents.send("screenshot-error", errorMessage)
+          } else {
+            console.error("Cannot send screenshot-error: mainWindow not available or destroyed")
+          }
         }
       }
     })
 
     globalShortcut.register("CommandOrControl+Enter", async () => {
-      await this.deps.processingHelper?.processScreenshots()
+      const config = configHelper.loadConfig();
+      const mode = config.mode || "code";
+      await this.deps.processingHelper?.processScreenshots(mode)
     })
 
     globalShortcut.register("CommandOrControl+R", () => {

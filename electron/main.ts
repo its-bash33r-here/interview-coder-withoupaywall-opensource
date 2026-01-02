@@ -31,7 +31,7 @@ const state = {
   processingHelper: null as ProcessingHelper | null,
 
   // View and state management
-  view: "queue" as "queue" | "solutions" | "debug",
+  view: "queue" as "queue" | "solutions" | "debug" | "mcq",
   problemInfo: null as any,
   hasDebugged: false,
 
@@ -47,7 +47,10 @@ const state = {
     INITIAL_SOLUTION_ERROR: "solution-error",
     DEBUG_START: "debug-start",
     DEBUG_SUCCESS: "debug-success",
-    DEBUG_ERROR: "debug-error"
+    DEBUG_ERROR: "debug-error",
+    MCQ_START: "mcq-start",
+    MCQ_SUCCESS: "mcq-success",
+    MCQ_ERROR: "mcq-error"
   } as const
 }
 
@@ -55,8 +58,8 @@ const state = {
 export interface IProcessingHelperDeps {
   getScreenshotHelper: () => ScreenshotHelper | null
   getMainWindow: () => BrowserWindow | null
-  getView: () => "queue" | "solutions" | "debug"
-  setView: (view: "queue" | "solutions" | "debug") => void
+  getView: () => "queue" | "solutions" | "debug" | "mcq"
+  setView: (view: "queue" | "solutions" | "debug" | "mcq") => void
   getProblemInfo: () => any
   setProblemInfo: (info: any) => void
   getScreenshotQueue: () => string[]
@@ -78,7 +81,7 @@ export interface IShortcutsHelperDeps {
   getImagePreview: (filepath: string) => Promise<string>
   processingHelper: ProcessingHelper | null
   clearQueues: () => void
-  setView: (view: "queue" | "solutions" | "debug") => void
+  setView: (view: "queue" | "solutions" | "debug" | "mcq") => void
   isVisible: () => boolean
   toggleMainWindow: () => void
   moveWindowLeft: () => void
@@ -99,10 +102,10 @@ export interface IIpcHandlerDeps {
   processingHelper: ProcessingHelper | null
   PROCESSING_EVENTS: typeof state.PROCESSING_EVENTS
   takeScreenshot: () => Promise<string>
-  getView: () => "queue" | "solutions" | "debug"
+  getView: () => "queue" | "solutions" | "debug" | "mcq"
   toggleMainWindow: () => void
   clearQueues: () => void
-  setView: (view: "queue" | "solutions" | "debug") => void
+  setView: (view: "queue" | "solutions" | "debug" | "mcq") => void
   moveWindowLeft: () => void
   moveWindowRight: () => void
   moveWindowUp: () => void
@@ -617,11 +620,11 @@ function getMainWindow(): BrowserWindow | null {
   return state.mainWindow
 }
 
-function getView(): "queue" | "solutions" | "debug" {
+function getView(): "queue" | "solutions" | "debug" | "mcq" {
   return state.view
 }
 
-function setView(view: "queue" | "solutions" | "debug"): void {
+function setView(view: "queue" | "solutions" | "debug" | "mcq"): void {
   state.view = view
   state.screenshotHelper?.setView(view)
 }

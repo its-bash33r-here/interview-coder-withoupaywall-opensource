@@ -311,3 +311,12 @@ If you have questions or need support, please open an issue on the GitHub reposi
 ---
 
 > **Remember:** This is a community resource. If you find it valuable, consider contributing rather than just requesting features. The project grows through collective effort, not individual demands.
+
+
+[ ] Toggle between Code and MCQ modes
+[ ] Take screenshot in MCQ mode
+[ ] Process MCQ screenshot
+[ ] Verify MCQ view displays correctly
+[ ] Test with multiple MCQs in one screenshot
+[ ] Verify mode persists after app restart
+[ ] Test error handling (invalid API key, etc.)

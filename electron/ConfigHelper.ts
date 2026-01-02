@@ -13,6 +13,7 @@ interface Config {
   debuggingModel: string;
   language: string;
   opacity: number;
+  mode: "code" | "mcq";  // Processing mode: code generation or MCQ answers
 }
 
 export class ConfigHelper extends EventEmitter {
@@ -24,7 +25,8 @@ export class ConfigHelper extends EventEmitter {
     solutionModel: "gemini-2.0-flash",
     debuggingModel: "gemini-2.0-flash",
     language: "python",
-    opacity: 1.0
+    opacity: 1.0,
+    mode: "code" // Default to code mode
   };
 
   constructor() {
@@ -97,6 +99,11 @@ export class ConfigHelper extends EventEmitter {
         // Ensure apiProvider is a valid value
         if (config.apiProvider !== "openai" && config.apiProvider !== "gemini"  && config.apiProvider !== "anthropic") {
           config.apiProvider = "gemini"; // Default to Gemini if invalid
+        }
+        
+        // Ensure mode is a valid value
+        if (config.mode !== "code" && config.mode !== "mcq") {
+          config.mode = "code"; // Default to code mode if invalid
         }
         
         // Sanitize model selections to ensure only allowed models are used
